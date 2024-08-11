@@ -4,7 +4,7 @@ package syncq
 import (
 	"context"
 	"errors"
-	"srvsrv/ctxerr"
+	"github.com/nveeser/srvsrv/ctxerr"
 	"sync/atomic"
 )
 

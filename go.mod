@@ -1,4 +1,4 @@
-module srvsrv
+module github.com/nveeser/srvsrv
 
 go 1.23rc2
 

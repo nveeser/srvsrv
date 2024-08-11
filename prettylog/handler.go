@@ -5,12 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/nveeser/srvsrv/prettylog/template"
 	"io"
 	"log/slog"
 	"os"
 	"runtime"
 	"slices"
-	"srvsrv/prettylog/template"
 	"strconv"
 	"sync"
 )
