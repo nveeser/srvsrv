@@ -8,9 +8,9 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"radar/prettylog/template"
 	"runtime"
 	"slices"
+	"srvsrv/prettylog/template"
 	"strconv"
 	"sync"
 )

@@ -2,11 +2,10 @@ package ctxerr
 
 import (
 	"errors"
+	"fmt"
 	"runtime"
 	"strings"
 )
-
-var fakeLineNumbers = false
 
 type stack struct {
 	callers []uintptr
@@ -29,11 +28,11 @@ func (e *Error) walkStack(skip int, f stackFn) {
 	var prev string // the name of the last-seen function
 	var diff bool   // true after the two stacks diverge
 	for i := 0; i < len(e.stack.callers); i++ {
-		thisFrame := frame(e.stack.callers, i)
-		name := thisFrame.Func.Name()
-
+		thisFrame := callerFrame(e.stack.callers, i)
+		name := thisFrame.funcName
 		if !diff && i < len(walkerStack.callers) {
-			if name == frame(walkerStack.callers, i).Func.Name() {
+			cFrame := callerFrame(walkerStack.callers, i)
+			if name == cFrame.funcName {
 				// both stacks share this PC, skip it.
 				continue
 			}
@@ -42,12 +41,9 @@ func (e *Error) walkStack(skip int, f stackFn) {
 		if name == prev {
 			continue
 		}
-		//name, ok := trimPrev(prev, name)
-		line := thisFrame.Line
-		if fakeLineNumbers {
-			line = 0
-		}
-		f(thisFrame.File, line, name)
+		// TODO - consider re-enabling trimming to keep file paths cleaner
+		// name, ok := trimPrev(prev, name)
+		f(thisFrame.file, thisFrame.line, name)
 		prev = name
 	}
 }
@@ -69,8 +65,18 @@ func trimPrev(prev, next string) (string, bool) {
 	return next[trim:], trim > 0
 }
 
+type frame struct {
+	file     string
+	line     int
+	funcName string
+}
+
+func (f *frame) String() string {
+	return fmt.Sprintf("[%s:%d] %s", f.file, f.line, f.funcName)
+}
+
 // frame returns the nth frame, with the frame at top of stack being 0.
-func frame(callers []uintptr, n int) *runtime.Frame {
+var callerFrame = func(callers []uintptr, n int) *frame {
 	frames := runtime.CallersFrames(callers)
 	var f runtime.Frame
 	for i := len(callers) - 1; i >= n; i-- {
@@ -80,7 +86,11 @@ func frame(callers []uintptr, n int) *runtime.Frame {
 			break // Should never happen, and this is just debugging.
 		}
 	}
-	return &f
+	return &frame{
+		file:     f.File,
+		line:     f.Line,
+		funcName: f.Func.Name(),
+	}
 }
 
 // callers is a wrapper for runtime.Callers that allocates a slice.
@@ -89,24 +99,3 @@ func callers(skip int) stack {
 	n := runtime.Callers(skip, stk[:])
 	return stack{stk[:n]}
 }
-
-//func callsite(depth int) string {
-//	_, file, line, ok := runtime.Caller(depth)
-//	if !ok {
-//		return "<unknown:???>"
-//	}
-//	return fmt.Sprintf("%s:%d", file, line)
-//}
-//
-//func stackTrace() {
-//	var pcs [32]uintptr
-//	n := runtime.Callers(3, pcs[:])
-//	frames := runtime.CallersFrames(pcs[:n])
-//	for {
-//		f, more := frames.Next()
-//		fmt.Printf("%s:%d (%s)\n", f.File, f.Line, f.Function)
-//		if !more {
-//			break
-//		}
-//	}
-//}

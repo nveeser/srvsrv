@@ -4,7 +4,7 @@ package syncq
 import (
 	"context"
 	"errors"
-	"radar/ctxerr"
+	"srvsrv/ctxerr"
 	"sync/atomic"
 )
 

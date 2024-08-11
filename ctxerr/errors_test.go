@@ -5,26 +5,55 @@ import (
 	"fmt"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"runtime"
 	"strings"
 	"testing"
 )
 
+var stackPathPrefix string
+
 func init() {
-	fakeLineNumbers = true
+	stackPathPrefix = "/no/prefix/found"
+	_, file, _, ok := runtime.Caller(0)
+	if ok {
+		i := strings.Index(file, "ctxerr")
+		stackPathPrefix = file[:i]
+	}
+}
+
+func setupFrame() func() {
+	orig := callerFrame
+	var count int
+	callerFrame = func(p []uintptr, n int) *frame {
+		count++
+		frame := orig(p, n)
+		if strings.HasPrefix(frame.file, stackPathPrefix) {
+			frame.file = strings.Replace(frame.file, stackPathPrefix, "/foo/src/", 1)
+			frame.line = count
+		}
+		return frame
+	}
+	return func() {
+		callerFrame = orig
+	}
 }
 
 func TestFormatError(t *testing.T) {
+	done := setupFrame()
+	defer done()
+
 	t.Run("Functions", func(t *testing.T) {
-		err := func1()
+		err := myFunc1()
 		got := fmt.Sprintf("%+v", err)
 		var want = `
 [op] 
 error happened
-	/home/nicholas/radar/ctxerr/errors_test.go:0 
-	   radar/ctxerr.func1(...)
-	/home/nicholas/radar/ctxerr/errors_test.go:0 
-	   radar/ctxerr.T.func2(...)
-`
+	/foo/src/ctxerr/errors_test.go:7 
+	   srvsrv/ctxerr.myFunc1(...)
+	/foo/src/ctxerr/errors_test.go:9 
+	   srvsrv/ctxerr.T.myFunc2(...)
+	/foo/src/ctxerr/errors_test.go:10 
+	   srvsrv/ctxerr.myFunc3(...)`
 
 		if diff := cmp.Diff(want, got, cmpopts.AcyclicTransformer("trim", strings.TrimSpace)); diff != "" {
 			t.Logf("Diff: -want/+got %s", diff)
@@ -51,21 +80,25 @@ concrete
 	})
 }
 
-func func1() error {
+//go:noinline
+func myFunc1() error {
 	var t T
-	return t.func2()
+	return t.myFunc2()
 }
 
 type T struct{}
 
-func (T) func2() error {
-	return E(Op("op"), func3())
+//go:noinline
+func (T) myFunc2() error {
+	return myFunc3()
 }
 
-func func3() error {
-	return func4()
+//go:noinline
+func myFunc3() error {
+	return E(Op("op"), myFunc4())
 }
 
-func func4() error {
+//go:noinline
+func myFunc4() error {
 	return errors.New("error happened")
 }
