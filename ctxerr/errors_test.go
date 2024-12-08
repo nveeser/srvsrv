@@ -49,11 +49,11 @@ func TestFormatError(t *testing.T) {
 [op] 
 error happened
 	/foo/src/ctxerr/errors_test.go:7 
-	   srvsrv/ctxerr.myFunc1(...)
+	   github.com/nveeser/srvsrv/ctxerr.myFunc1(...)
 	/foo/src/ctxerr/errors_test.go:9 
-	   srvsrv/ctxerr.T.myFunc2(...)
+	   github.com/nveeser/srvsrv/ctxerr.T.myFunc2(...)
 	/foo/src/ctxerr/errors_test.go:10 
-	   srvsrv/ctxerr.myFunc3(...)`
+	   github.com/nveeser/srvsrv/ctxerr.myFunc3(...)`
 
 		if diff := cmp.Diff(want, got, cmpopts.AcyclicTransformer("trim", strings.TrimSpace)); diff != "" {
 			t.Logf("Diff: -want/+got %s", diff)
