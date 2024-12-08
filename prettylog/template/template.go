@@ -9,23 +9,11 @@ import (
 	"text/template/parse"
 )
 
-type Option func(*template.Template) *template.Template
-
-// Delims sets the delimiter for the template during parsing.
-func Delims(l, r string) Option {
-	return func(t *template.Template) *template.Template {
-		return t.Delims(l, r)
-	}
-}
-
 // Parse parse the specified format into a template and extracts
 // the identifiers in the actions present in the template.
-func Parse(format string, opts ...Option) (*KeyedTemplate, error) {
+func Parse(format string) (*KeyedTemplate, error) {
 	tmpl := template.New("log").Delims("{", "}")
 	tmpl.Funcs(functionMap)
-	for _, o := range opts {
-		tmpl = o(tmpl)
-	}
 	tmpl, err := tmpl.Parse(format)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing template: %w", err)
@@ -36,7 +24,6 @@ func Parse(format string, opts ...Option) (*KeyedTemplate, error) {
 			out = append(out, keys[0])
 		}
 	})
-
 	return &KeyedTemplate{
 		Template: tmpl,
 		keys:     out,
@@ -61,7 +48,6 @@ var functionMap = map[string]any{
 		}
 		return arg + value
 	},
-
 	"post": func(arg, value string) string {
 		if value == "" {
 			return ""
