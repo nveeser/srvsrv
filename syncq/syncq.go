@@ -4,7 +4,9 @@ package syncq
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/nveeser/srvsrv/ctxerr"
+	"strings"
 	"sync/atomic"
 )
 
@@ -20,19 +22,21 @@ import (
 // to Pop() will return a zero value and false. If there are no more consumers
 // to call Pop() then Cancel().
 //
-// # Summmary
+// # Summary
 //
 //   - Producers call Push()
 //   - Consumers call Pop()
 //   - Close() signals to consumers that Push() will no longer be called
 //   - Shutdown() signals to producers that Pop() will no longer be called
 type Queue[E any] struct {
+	max      int
 	pushc    chan E
 	popc     chan E
 	shutdown chan any
 	done     chan any
 	size     atomic.Int64
 	total    atomic.Int64
+	full     atomic.Int64
 }
 
 // New returns a new initialized Queue. The caller is responsible for calling
@@ -40,8 +44,9 @@ type Queue[E any] struct {
 //
 // To ensure that no resources are leaked it is common to defer a call to
 // WaitEmpty() to ensure that the internal goroutine completes.
-func New[E any]() *Queue[E] {
+func New[E any](n int) *Queue[E] {
 	q := &Queue[E]{
+		max:      n,
 		pushc:    make(chan E),
 		popc:     make(chan E),
 		shutdown: make(chan any),
@@ -66,12 +71,16 @@ var ErrQueueShutdown = errors.New("Queue is shutdown")
 // canceled the queue returns ErrQueueCanceled. Calling Push() after
 // Close() will panic.
 func (q *Queue[E]) Push(ctx context.Context, e E) error {
+	logf("Push: start")
 	select {
 	case <-ctx.Done():
+		logf("Push: context.Canceled")
 		return ctxerr.E(ctx, ctx.Err())
 	case <-q.shutdown:
+		logf("Push: q.shutdown")
 		return ErrQueueShutdown
 	case q.pushc <- e:
+		logf("Push: add element")
 		q.total.Add(1)
 		q.size.Add(1)
 		return nil
@@ -82,17 +91,21 @@ func (q *Queue[E]) Push(ctx context.Context, e E) error {
 // blocks until an item is available. If the Queue is closed and empty, or canceled or the
 // specified context expires then the zero value and false is returned.
 func (q *Queue[E]) Pop(ctx context.Context) (element E, open bool) {
+	logf("Pop: start")
 	var zero E
 	select {
 	case x, found := <-q.popc:
 		if found {
 			q.size.Add(-1)
 		}
+		logf("Pop: got")
 		return x, found
 
 	case <-q.shutdown:
+		logf("Pop: q.shutdown")
 		return zero, false
 	case <-ctx.Done():
+		logf("Pop: ctx.Canceled")
 		return zero, false
 	}
 }
@@ -114,10 +127,13 @@ func (q *Queue[E]) WaitEmpty(ctx context.Context) bool {
 	q.Close()
 	select {
 	case <-q.done:
+		logf("WaitEmpty: q.done")
 		return true
 	case <-ctx.Done():
+		logf("WaitEmpty: q.shutdown")
 		q.Shutdown()
 		<-q.done
+		logf("WaitEmpty: q.done")
 		return false
 	}
 }
@@ -135,42 +151,82 @@ func (q *Queue[E]) goqueue() {
 	defer close(q.done)
 	defer close(q.popc)
 
-	var queue []E
-	var next E
-	var pushc chan E // nil when once queue is closed
-	var popc chan E  // nil when popc is ready to send
-	pushc = q.pushc
+	var s state[E]
 
 	for {
-		select {
-		case e, ok := <-pushc:
-			if ok {
-				queue = append(queue, e)
-			} else {
-				pushc = nil
-			}
-
-		case popc <- next:
-			popc = nil
-
-		case <-q.shutdown:
-			return
-		}
-		empty := len(queue) == 0 && popc == nil
-		closed := pushc == nil
-		popReady := popc == nil
+		qEmpty := len(s.queue) == 0
+		qReady := len(s.queue) > 0
+		qFull := len(s.queue) >= q.max && q.max > 0
 
 		switch {
+		case !s.closed && !qFull && s.pushc == nil:
+			logf("goqueue: full=false %s", &s)
+			s.pushc = q.pushc
+		case !s.closed && qFull && s.pushc != nil:
+			logf("goqueue: full=true %s", &s)
+			q.full.Add(1)
+			s.pushc = nil
 		// input channel is closed and queue empty
-		case closed && empty:
+		case s.closed && qEmpty:
+			logf("goqueue: closed empty %s", &s)
 			return
-
+		}
 		// output channel is ready / queue not empty
-		case popReady && len(queue) > 0:
-			next, queue = queue[0], queue[1:]
-			popc = q.popc
+		if qReady && s.popc == nil {
+			logf("goqueue: set next")
+			s.next = s.queue[0]
+			s.popc = q.popc
+		}
+
+		logf("goqueue: select %s", &s)
+		select {
+		case e, ok := <-s.pushc:
+			if ok {
+				logf("goqueue: pushc -> queue %s", &s)
+				s.queue = append(s.queue, e)
+			} else {
+				logf("goqueue: pushc -> closed %s", &s)
+				s.pushc = nil
+				s.closed = true
+			}
+
+		case s.popc <- s.next:
+			logf("goqueue: popc <- next %s", &s)
+			s.queue = s.queue[1:]
+			s.popc = nil
+
+		case <-q.shutdown:
+			logf("goqueue: shutdown")
+			return
 		}
 	}
+}
+
+type state[E any] struct {
+	pushc  chan E // nil when queue is closed or full
+	popc   chan E // non-nil when value is ready to send
+	closed bool
+	queue  []E
+	next   E
+}
+
+func (s *state[E]) String() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "pushc=")
+	if s.pushc == nil {
+		fmt.Fprintf(&b, "off ")
+	} else {
+		fmt.Fprintf(&b, "on ")
+	}
+	fmt.Fprintf(&b, "popc=")
+	if s.popc == nil {
+		fmt.Fprintf(&b, "off ")
+	} else {
+		fmt.Fprintf(&b, "on ")
+	}
+	fmt.Fprintf(&b, "closed=%t ", s.closed)
+	fmt.Fprintf(&b, "queue=%d", len(s.queue))
+	return b.String()
 }
 
 // TODO figure out if this is useful.
@@ -224,3 +280,5 @@ func (b *batchingBuffer[E, S]) next() (S, bool) {
 	next, b.queue = b.queue[:b.n], b.queue[b.n:]
 	return next, true
 }
+
+var logf = func(msg string, args ...any) {}

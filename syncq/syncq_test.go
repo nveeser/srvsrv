@@ -3,8 +3,10 @@ package syncq
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/google/go-cmp/cmp"
 	"golang.org/x/sync/errgroup"
+	"log"
 	"slices"
 	"sort"
 	"sync"
@@ -12,9 +14,16 @@ import (
 	"time"
 )
 
+func init() {
+	log.SetFlags(log.Lshortfile | log.Lmsgprefix)
+	logf = func(format string, v ...any) {
+		log.Output(2, fmt.Sprintf(format, v...))
+	}
+}
+
 func ExampleQueue_PushPop(t *testing.T) {
 	ctx := context.Background()
-	q := New[int]()
+	q := New[int](10)
 	defer q.WaitEmpty(ctx)
 
 	if err := q.Push(ctx, 3); err != nil {
@@ -36,7 +45,7 @@ func ExampleQueue_PushPop(t *testing.T) {
 func TestPush(t *testing.T) {
 	t.Run("ErrorOnCanceledContext", func(t *testing.T) {
 		ctx := context.Background()
-		q := New[int]()
+		q := New[int](10)
 		defer q.WaitEmpty(context.Background())
 
 		ctx, cancel := context.WithCancel(ctx)
@@ -49,13 +58,70 @@ func TestPush(t *testing.T) {
 	})
 	t.Run("ErrorShutdownQueue", func(t *testing.T) {
 		ctx := context.Background()
-		q := New[int]()
+		q := New[int](10)
 		defer q.WaitEmpty(context.Background())
 		q.Shutdown()
 
 		err := q.Push(ctx, 1)
 		if !errors.Is(err, ErrQueueShutdown) {
 			t.Errorf("Push got err %v wanted err %v", err, ErrQueueShutdown)
+		}
+	})
+	var done chan any
+	var goErr error
+	goPush := func(ctx context.Context, queue *Queue[int], val int) {
+		done = make(chan any)
+		go func() {
+			goErr = queue.Push(ctx, val)
+			logf("goPush() done")
+			close(done)
+		}()
+	}
+	isBlocked := func() bool {
+		select {
+		case <-done:
+			return false
+		default:
+			return true
+		}
+	}
+	wait := func() bool {
+		select {
+		case <-done:
+			return true
+		case <-time.After(500 * time.Millisecond):
+			return false
+		}
+	}
+	t.Run("PushFullBlocked", func(t *testing.T) {
+		ctx := context.Background()
+		q := New[int](1)
+		defer q.WaitEmpty(context.Background())
+
+		logf("push(1)")
+		err := q.Push(ctx, 1)
+		if err != nil {
+			t.Fatalf("Push() got error: %+v", err)
+		}
+		logf("goPush(4)")
+		goPush(ctx, q, 4)
+		if !isBlocked() {
+			t.Errorf("Push() did not block")
+		}
+		logf("pop() => 1")
+		if got, ok := q.Pop(ctx); !ok || got != 1 {
+			t.Errorf("Pop() got %d %t, wanted %d %t", got, ok, 1, true)
+		}
+		logf("wait()")
+		if !wait() {
+			t.Errorf("Push() is blocked")
+		}
+		logf("Pop() => 4")
+		if got, ok := q.Pop(ctx); !ok || got != 4 {
+			t.Errorf("Pop() got %d %t, wanted %d %t", got, ok, 4, true)
+		}
+		if goErr != nil {
+			t.Errorf("Pop() async got error: %+v", goErr)
 		}
 	})
 }
@@ -91,7 +157,7 @@ func TestPop(t *testing.T) {
 
 	t.Run("BlockUntilValue", func(t *testing.T) {
 		ctx := context.Background()
-		q := New[int]()
+		q := New[int](10)
 		defer q.WaitEmpty(ctx)
 
 		goPop(ctx, q)
@@ -112,7 +178,7 @@ func TestPop(t *testing.T) {
 	})
 	t.Run("BlockUntilClose", func(t *testing.T) {
 		ctx := context.Background()
-		q := New[int]()
+		q := New[int](10)
 		defer q.WaitEmpty(ctx)
 
 		goPop(ctx, q)
@@ -131,7 +197,7 @@ func TestPop(t *testing.T) {
 	})
 	t.Run("BlockUntilCancel", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
-		q := New[int]()
+		q := New[int](10)
 		defer q.WaitEmpty(context.Background())
 
 		goPop(ctx, q)
@@ -153,7 +219,7 @@ func TestPop(t *testing.T) {
 func TestWaitEmpty(t *testing.T) {
 	t.Run("Pop/empty=true", func(t *testing.T) {
 		ctx := context.Background()
-		q := New[int]()
+		q := New[int](10)
 		q.Push(ctx, 3)
 		q.Close()
 
@@ -178,7 +244,7 @@ func TestWaitEmpty(t *testing.T) {
 	})
 	t.Run("ContextCanceled/empty=false", func(t *testing.T) {
 		ctx := context.Background()
-		q := New[int]()
+		q := New[int](10)
 		q.Push(ctx, 3)
 		q.Close()
 		dctx, cancel := context.WithCancel(ctx)
@@ -206,7 +272,7 @@ func TestWaitEmpty(t *testing.T) {
 
 func TestSize(t *testing.T) {
 	ctx := context.Background()
-	q := New[int]()
+	q := New[int](10)
 	defer q.WaitEmpty(ctx)
 	for i := 0; i < 10; i++ {
 		q.Push(ctx, i)
@@ -231,43 +297,57 @@ func TestSize(t *testing.T) {
 func TestConcurrentReadWrite(t *testing.T) {
 	cases := []struct {
 		name      string
+		max       int
 		producers *producers
 		consumers *consumers
 		want      []int
 		wantErr   bool
 	}{
 		{
-			name:      "push=1/pop=1",
+			name:      "max=100/push=1/pop=1",
+			max:       100,
 			producers: &producers{n: 1},
 			consumers: &consumers{n: 1},
 			want:      want(10, 1),
 		},
 		{
-			name:      "push=3/pop=1",
+			name:      "max=100/push=3/pop=1",
+			max:       100,
 			producers: &producers{n: 3},
 			consumers: &consumers{n: 1},
 			want:      want(10, 3),
 		},
 		{
-			name:      "push=1/pop=3",
+			name:      "max=100/push=1/pop=3",
+			max:       100,
 			producers: &producers{n: 1},
 			consumers: &consumers{n: 3},
 			want:      want(10, 1),
 		},
 		{
-			name:      "push=3/pop=3",
+			name:      "max=100/push=3/pop=3",
+			max:       100,
 			producers: &producers{n: 3},
 			consumers: &consumers{n: 3},
 			want:      want(10, 3),
 		},
 		{
-			name:      "push=10/pop=10",
+			name:      "max=100/push=10/pop=10",
+			max:       100,
 			producers: &producers{n: 10, writes: 100},
 			consumers: &consumers{n: 10},
 			want:      want(100, 10),
 		},
 		{
-			name: "push=err/pop=10",
+			name:      "max=5/push=10/pop=10",
+			max:       5,
+			producers: &producers{n: 10, writes: 100},
+			consumers: &consumers{n: 10},
+			want:      want(100, 10),
+		},
+		{
+			name: "max=100/push=err/pop=10",
+			max:  100,
 			producers: &producers{
 				n:      10,
 				writes: 10,
@@ -280,7 +360,7 @@ func TestConcurrentReadWrite(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			q := New[int]()
+			q := New[int](tc.max)
 			defer q.WaitEmpty(ctx)
 
 			tc.producers.Go(ctx, q)
