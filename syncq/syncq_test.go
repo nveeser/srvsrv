@@ -3,6 +3,7 @@ package syncq
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"github.com/google/go-cmp/cmp"
 	"golang.org/x/sync/errgroup"
@@ -14,10 +15,14 @@ import (
 	"time"
 )
 
+var debug = flag.Bool("debug", false, "Enable logging during tests")
+
 func init() {
-	log.SetFlags(log.Lshortfile | log.Lmsgprefix)
-	logf = func(format string, v ...any) {
-		log.Output(2, fmt.Sprintf(format, v...))
+	if *debug {
+		log.SetFlags(log.Lshortfile | log.Lmsgprefix)
+		logf = func(format string, v ...any) {
+			log.Output(2, fmt.Sprintf(format, v...))
+		}
 	}
 }
 

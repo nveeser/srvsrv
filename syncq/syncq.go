@@ -152,11 +152,15 @@ func (q *Queue[E]) goqueue() {
 	defer close(q.popc)
 
 	var s state[E]
+	s.queue = make([]E, q.max)
 
 	for {
-		qEmpty := len(s.queue) == 0
-		qReady := len(s.queue) > 0
-		qFull := len(s.queue) >= q.max && q.max > 0
+		qEmpty := s.size == 0
+		qReady := s.size > 0
+		qFull := s.size == q.max
+		//qEmpty := len(s.queue) == 0
+		//qReady := len(s.queue) > 0
+		//qFull := len(s.queue) >= q.max && q.max > 0
 
 		switch {
 		case !s.closed && !qFull && s.pushc == nil:
@@ -174,7 +178,7 @@ func (q *Queue[E]) goqueue() {
 		// output channel is ready / queue not empty
 		if qReady && s.popc == nil {
 			logf("goqueue: set next")
-			s.next = s.queue[0]
+			//s.next = s.queue[0]
 			s.popc = q.popc
 		}
 
@@ -183,16 +187,22 @@ func (q *Queue[E]) goqueue() {
 		case e, ok := <-s.pushc:
 			if ok {
 				logf("goqueue: pushc -> queue %s", &s)
-				s.queue = append(s.queue, e)
+				//s.queue = append(s.queue, e)
+				back := (s.front + s.size) % q.max
+				s.queue[back] = e
+				s.size++
+				logf("goqueue: pushc -> queue %s", &s)
 			} else {
 				logf("goqueue: pushc -> closed %s", &s)
 				s.pushc = nil
 				s.closed = true
 			}
 
-		case s.popc <- s.next:
+		case s.popc <- s.queue[s.front]:
 			logf("goqueue: popc <- next %s", &s)
-			s.queue = s.queue[1:]
+			//s.queue = s.queue[1:]
+			s.front = (s.front + 1) % q.max
+			s.size--
 			s.popc = nil
 
 		case <-q.shutdown:
@@ -207,7 +217,9 @@ type state[E any] struct {
 	popc   chan E // non-nil when value is ready to send
 	closed bool
 	queue  []E
-	next   E
+	size   int
+	front  int
+	//next   E
 }
 
 func (s *state[E]) String() string {
@@ -225,7 +237,7 @@ func (s *state[E]) String() string {
 		fmt.Fprintf(&b, "on ")
 	}
 	fmt.Fprintf(&b, "closed=%t ", s.closed)
-	fmt.Fprintf(&b, "queue=%d", len(s.queue))
+	fmt.Fprintf(&b, "queue=(front=%d size=%d)", s.front, s.size)
 	return b.String()
 }
 
