@@ -1,68 +1,64 @@
 package ctxerr
 
 import (
-	"errors"
 	"fmt"
+	"iter"
 	"runtime"
-	"strings"
 )
 
-type stack struct {
-	callers []uintptr
+// callers is a wrapper for runtime.Callers that allocates a slice.
+func callers(skip int) stack {
+	var stk [64]uintptr
+	n := runtime.Callers(skip+2, stk[:])
+	return stk[:n]
 }
 
-// populateStack will update the callers if there is no existing
-// Error value found by unwrapping this error with errors.As().
-func (e *Error) populateStack() {
-	var e2 *Error
-	// only if there is no *Error value in the cause chain.
-	if !errors.As(e.Err, &e2) {
-		e.stack = callers(5)
+type stack []uintptr
+
+func (s stack) frames() []*frame {
+	var out []*frame
+	frames := runtime.CallersFrames(s)
+	var f runtime.Frame
+	for i := 0; i < len(s); i++ {
+		var ok bool
+		f, ok = frames.Next()
+		if !ok {
+			break // Should never happen, and this is just debugging.
+		}
+		out = append(out, newFrame(i, f))
+	}
+	return out
+}
+
+var newFrame = func(i int, f runtime.Frame) *frame {
+	return &frame{
+		file:     f.File,
+		line:     f.Line,
+		funcName: f.Func.Name(),
 	}
 }
 
-type stackFn func(file string, line int, fname string)
-
-func (e *Error) walkStack(skip int, f stackFn) {
-	walkerStack := callers(skip)
-	var prev string // the name of the last-seen function
-	var diff bool   // true after the two stacks diverge
-	for i := 0; i < len(e.stack.callers); i++ {
-		thisFrame := callerFrame(e.stack.callers, i)
-		name := thisFrame.funcName
-		if !diff && i < len(walkerStack.callers) {
-			cFrame := callerFrame(walkerStack.callers, i)
-			if name == cFrame.funcName {
-				// both stacks share this PC, skip it.
-				continue
+// walkStack returns a sequence of frames from the specified stack and stops when
+// the frame matches the frame of the caller when the frames match the same frame
+// of the caller.
+func walkStack(s stack, skip int) iter.Seq[*frame] {
+	return func(yield func(*frame) bool) {
+		stackFrames := s.frames()
+		callerFrames := callers(skip + 1).frames()
+		for i, sf := range stackFrames {
+			end := len(stackFrames) - i
+			j := len(callerFrames) - end
+			if j > 0 {
+				cf := callerFrames[j]
+				if cf.funcName == sf.funcName {
+					return
+				}
 			}
-			diff = true
+			if !yield(sf) {
+				return
+			}
 		}
-		if name == prev {
-			continue
-		}
-		// TODO - consider re-enabling trimming to keep file paths cleaner
-		// name, ok := trimPrev(prev, name)
-		f(thisFrame.file, thisFrame.line, name)
-		prev = name
 	}
-}
-
-func trimPrev(prev, next string) (string, bool) {
-	// Find the uncommon prefix between this and the previous
-	// function name, separating by dots and slashes.
-	trim := 0
-	for {
-		j := strings.IndexAny(next[trim:], "./")
-		if j < 0 {
-			break
-		}
-		if !strings.HasPrefix(prev, next[:j+trim]) {
-			break
-		}
-		trim += j + 1 // skip over the separator
-	}
-	return next[trim:], trim > 0
 }
 
 type frame struct {
@@ -73,29 +69,4 @@ type frame struct {
 
 func (f *frame) String() string {
 	return fmt.Sprintf("[%s:%d] %s", f.file, f.line, f.funcName)
-}
-
-// frame returns the nth frame, with the frame at top of stack being 0.
-var callerFrame = func(callers []uintptr, n int) *frame {
-	frames := runtime.CallersFrames(callers)
-	var f runtime.Frame
-	for i := len(callers) - 1; i >= n; i-- {
-		var ok bool
-		f, ok = frames.Next()
-		if !ok {
-			break // Should never happen, and this is just debugging.
-		}
-	}
-	return &frame{
-		file:     f.File,
-		line:     f.Line,
-		funcName: f.Func.Name(),
-	}
-}
-
-// callers is a wrapper for runtime.Callers that allocates a slice.
-func callers(skip int) stack {
-	var stk [64]uintptr
-	n := runtime.Callers(skip, stk[:])
-	return stack{stk[:n]}
 }

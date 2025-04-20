@@ -8,16 +8,13 @@ package ctxerr
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/cyrusaf/ctxlog"
-	"io"
 	"log"
 	"log/slog"
 	"reflect"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 )
 
@@ -30,45 +27,55 @@ var ErrorPrefixKeys = []string{
 
 type Op string
 
+func Opf(format string, args ...any) Op {
+	return Op(fmt.Sprintf(format, args...))
+}
+
 type Error struct {
 	Op    Op
 	Msg   string
-	Err   error
+	Cause error
 	Attrs map[string]string
 	stack
 }
 
 func E(args ...any) error {
-	e := newError(args...)
+	if len(args) == 0 {
+		panic("E() called with no arguments")
+	}
+	e := newError(1, args)
 	return e
 }
 
-// Tests:
-// 0 args
-// 1 args
-// 2 args
-// no string
-
 func Ef(args ...any) error {
+	if len(args) == 0 {
+		panic("E() called with no arguments")
+	}
+	e := newError(1, formatStringArgs(args))
+	return e
+}
+
+func formatStringArgs(args []any) []any {
 	idx := slices.IndexFunc(args, func(v any) bool {
 		_, ok := v.(string)
 		return ok
 	})
-	if idx > 0 {
-		var fmtArgs []any
-		args, fmtArgs = args[:idx], args[idx:]
-		msg := fmtArgs[0].(string)
-		if len(fmtArgs) > 1 {
-			msg = fmt.Sprintf(msg, fmtArgs[1:]...)
-		}
-		args = append(args, msg)
+	if idx < 0 {
+		return args
 	}
-	e := newError(args...)
-	return e
+	var fmtArgs []any
+	args, fmtArgs = args[:idx], args[idx:]
+	msg := fmtArgs[0].(string)
+	if len(fmtArgs) > 1 {
+		msg = fmt.Sprintf(msg, fmtArgs[1:]...)
+	}
+	return append(args, msg)
 }
 
-func newError(args ...any) *Error {
-	e := &Error{}
+func newError(skip int, args []any) *Error {
+	e := &Error{
+		stack: callers(skip + 1),
+	}
 	for _, arg := range args {
 		switch arg := arg.(type) {
 		case Op:
@@ -77,7 +84,7 @@ func newError(args ...any) *Error {
 		case *Error:
 			// Make a copy
 			copyArg := *arg
-			e.Err = &copyArg
+			e.Cause = &copyArg
 
 		case context.Context:
 			v := ctxlog.GetAttrs(arg)
@@ -90,7 +97,7 @@ func newError(args ...any) *Error {
 			if arg == nil {
 				panic("nil error passed to E()")
 			}
-			e.Err = arg
+			e.Cause = arg
 		case string:
 			e.Msg = arg
 
@@ -100,88 +107,21 @@ func newError(args ...any) *Error {
 			panic("E() called with unknown type" + reflect.TypeOf(arg).String())
 		}
 	}
-	e.populateStack()
+
+	if e.Op == "" && e.Cause == nil && e.Msg == "" && e.Attrs == nil {
+		panic("E() called with no arguments")
+	}
 	return e
 }
 
-func (e *Error) Unwrap() error { return e.Err }
+func (e *Error) Unwrap() error { return e.Cause }
 
 func (e *Error) isZero() bool {
-	return e.Op == "" && e.Msg == "" && e.Err == nil
+	return e.Op == "" && e.Msg == "" && e.Cause == nil
 }
 
 func (e *Error) Error() string {
-	var b strings.Builder
-	e.writeSummary(&b, true)
-	return b.String()
-}
-
-func (e *Error) Format(s fmt.State, verb rune) {
-	switch verb {
-	case 'w', 's':
-		e.writeSummary(s, true)
-
-	case 'v':
-		var curr error = e
-		var stacked *Error = e
-		var written bool
-		for curr != nil {
-			if written {
-				io.WriteString(s, "\n")
-			}
-			if ee, ok := curr.(*Error); ok {
-				ee.writeSummary(s, false)
-				stacked = ee
-			} else {
-				io.WriteString(s, curr.Error())
-			}
-			written = true
-			curr = errors.Unwrap(curr)
-		}
-		stacked.walkStack(3, func(file string, line int, fname string) {
-			if written {
-				io.WriteString(s, "\n\t")
-			}
-			writeCallsite(s, file, line)
-			io.WriteString(s, " \n\t   ")
-			io.WriteString(s, fname)
-			io.WriteString(s, "(...)")
-			written = true
-		})
-	}
-}
-
-var writeCallsite = func(w io.Writer, file string, line int) {
-	w.Write([]byte(file))
-	w.Write([]byte(":"))
-	w.Write(strconv.AppendInt(nil, int64(line), 10))
-}
-
-func (e *Error) writeSummary(w io.Writer, withCause bool) {
-	var written bool
-	if e.Op != "" {
-		io.WriteString(w, "[")
-		io.WriteString(w, string(e.Op))
-		io.WriteString(w, "] ")
-		written = true
-	}
-	if e.Msg != "" {
-		if written {
-			io.WriteString(w, ": ")
-		}
-		io.WriteString(w, e.Msg)
-	}
-	if e.Err != nil && withCause {
-		if ee, ok := e.Err.(*Error); ok {
-			ee.writeSummary(w, false)
-		} else {
-			if !written {
-				io.WriteString(w, "ctxerr.Error")
-			}
-			io.WriteString(w, ": ")
-			io.WriteString(w, e.Err.Error())
-		}
-	}
+	return fmt.Sprintf("%s", e)
 }
 
 func ContextError(ctx context.Context, err error) error {
@@ -191,15 +131,6 @@ func ContextError(ctx context.Context, err error) error {
 	args = append(args, err)
 	format.WriteString(": %w")
 	return fmt.Errorf(format.String(), args)
-}
-
-// errorString is a trivial implementation of error.
-type errorString struct {
-	s string
-}
-
-func (e *errorString) Error() string {
-	return e.s
 }
 
 // Errorf returns a new error adding attributes from the context

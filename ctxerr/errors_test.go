@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"github.com/nveeser/srvsrv/ctxerr/testdata"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -14,91 +16,145 @@ var stackPathPrefix string
 
 func init() {
 	stackPathPrefix = "/no/prefix/found"
-	_, file, _, ok := runtime.Caller(0)
-	if ok {
+	if _, file, _, ok := runtime.Caller(0); ok {
 		i := strings.Index(file, "ctxerr")
 		stackPathPrefix = file[:i]
 	}
 }
 
 func setupFrame() func() {
-	orig := callerFrame
-	var count int
-	callerFrame = func(p []uintptr, n int) *frame {
-		count++
-		frame := orig(p, n)
+	orig := newFrame
+	newFrame = func(i int, f runtime.Frame) *frame {
+		frame := orig(i, f)
 		if strings.HasPrefix(frame.file, stackPathPrefix) {
 			frame.file = strings.Replace(frame.file, stackPathPrefix, "/foo/src/", 1)
-			frame.line = count
+			frame.line = i + 10*10
 		}
 		return frame
 	}
 	return func() {
-		callerFrame = orig
+		newFrame = orig
 	}
 }
 
-func TestFormatError(t *testing.T) {
-	done := setupFrame()
-	defer done()
+// fmt.Formatter %s
+// fmt.Formatter %v
+// fmt.Formatter %+v
+// Op / Msg / Cause
+// Cause { nil, Error, error }
 
-	t.Run("Functions", func(t *testing.T) {
-		err := myFunc1()
-		got := fmt.Sprintf("%+v", err)
-		var want = `
-[op] 
-error happened
-	/foo/src/ctxerr/errors_test.go:7 
-	   github.com/nveeser/srvsrv/ctxerr.myFunc1(...)
-	/foo/src/ctxerr/errors_test.go:9 
-	   github.com/nveeser/srvsrv/ctxerr.T.myFunc2(...)
-	/foo/src/ctxerr/errors_test.go:10 
-	   github.com/nveeser/srvsrv/ctxerr.myFunc3(...)`
+func TestFormatString(t *testing.T) {
+	cases := []struct {
+		name  string
+		input error
+		want  string
+	}{
+		{
+			name:  "Op",
+			input: E(Op("open-db")),
+			want:  "[open-db]",
+		},
+		{
+			name:  "Msg",
+			input: E("Message for new error"),
+			want:  "Message for new error",
+		},
+		{
+			name:  "Op/Msg",
+			input: E(Op("open-db"), "Message for new error"),
+			want:  "[open-db]: Message for new error",
+		},
+		{
+			name:  "Op/Cause",
+			input: E(Op("open-db"), errors.New("error opening db")),
+			want:  "[open-db]: error opening db",
+		},
+		{
+			name:  "Msg/Cause",
+			input: E("Message for new error", errors.New("error opening db")),
+			want:  "Message for new error: error opening db",
+		},
+		{
+			name:  "Msg/Op/cause",
+			input: E(Op("open-db"), "Message for new error", errors.New("error opening db")),
+			want:  "[open-db]: Message for new error: error opening db",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := fmt.Sprintf("%s", tc.input)
+			if diff := cmp.Diff(tc.want, got, cmpopts.AcyclicTransformer("trim", trimWhitespace)); diff != "" {
+				t.Errorf("Diff: -want/+got %s", diff)
+				t.Logf("got\n%s\n", got)
+				t.Logf("wanted\n%s\n", tc.want)
+			}
+		})
+	}
+}
 
-		if diff := cmp.Diff(want, got, cmpopts.AcyclicTransformer("trim", strings.TrimSpace)); diff != "" {
-			t.Logf("Diff: -want/+got %s", diff)
+func TestFormatVerbose(t *testing.T) {
+	err := myFunc1(errors.New("connection error"))
+	err = Ef(Op("open-db"), err, "opening database: %s", "addr=172.10.10.10:256")
+	err = E(Op("init-storage"), "error reading", err)
+	err = fmt.Errorf("error: starting database: %w", err)
+	err = E(Op("start-server"), err)
+
+	t.Run("no-stack", func(t *testing.T) {
+		done := setupFrame()
+		defer done()
+		got := fmt.Sprintf("%x", err)
+		want := testdata.Read(t, "chain.txt")
+
+		if diff := cmp.Diff(want, got, cmpopts.AcyclicTransformer("trim", trimWhitespace)); diff != "" {
+			t.Errorf("Diff: -want/+got %s", diff)
 			t.Logf("got\n%s\n", got)
 			t.Logf("wanted\n%s\n", want)
-			t.Fail()
 		}
 	})
-	t.Run("Wrapping", func(t *testing.T) {
-		err := E(Op("one"), "error", E(Op("two"), "error building foo", E(Op("three"), "error building bar", errors.New("concrete"))))
-		got := fmt.Sprintf("%+v", err)
-		want := `
-[one] : error
-[two] : error building foo
-[three] : error building bar
-concrete
-`
-		if diff := cmp.Diff(want, got, cmpopts.AcyclicTransformer("trim", strings.TrimSpace)); diff != "" {
-			t.Logf("Diff: -want/+got %s", diff)
+	t.Run("stack", func(t *testing.T) {
+		done := setupFrame()
+		defer done()
+		got := fmt.Sprintf("%+x", err)
+		want := testdata.Read(t, "chain-stack.txt")
+
+		if diff := cmp.Diff(want, got, cmpopts.AcyclicTransformer("trim", trimWhitespace)); diff != "" {
+			t.Errorf("Diff: -want/+got %s", diff)
 			t.Logf("got\n%s\n", got)
 			t.Logf("wanted\n%s\n", want)
-			t.Fail()
 		}
 	})
+
+	if t.Failed() {
+		dumpStacks(t, err)
+	}
 }
 
-//go:noinline
-func myFunc1() error {
-	var t T
-	return t.myFunc2()
+func dumpStacks(t *testing.T, err error) {
+	t.Logf("-----[Cause Chain]----")
+	var last *Error
+	for e := range unwrap(err) {
+		t.Logf("{Cause} %s", e)
+		if x, ok := e.(*Error); ok {
+			for i, frame := range x.stack.frames() {
+				t.Logf("  [%d] %+v", i, frame)
+			}
+			last = x
+		}
+	}
+
+	t.Logf("-----[Caller Stack]----")
+	for i, frame := range callers(1).frames() {
+		t.Logf("[%d] %+v", i, frame)
+	}
+	t.Logf("______[Walk Stack]______")
+	for f := range walkStack(last.stack, 1) {
+		t.Logf("%+v", f)
+	}
 }
 
-type T struct{}
-
-//go:noinline
-func (T) myFunc2() error {
-	return myFunc3()
-}
-
-//go:noinline
-func myFunc3() error {
-	return E(Op("op"), myFunc4())
-}
-
-//go:noinline
-func myFunc4() error {
-	return errors.New("error happened")
+func trimWhitespace(s string) string {
+	s = strings.TrimSpace(s)
+	re := regexp.MustCompile(`\s+`)
+	s = re.ReplaceAllString(s, " ")
+	return s
 }
