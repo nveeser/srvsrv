@@ -1,0 +1,10 @@
+{
+  "a": {
+    "value": "1.2.3.4",
+    "seq" : [
+      {"obj1" : { "name": "one"}},
+      {"obj2" : { "name": "two"}},
+      {"obj3" : { "name": "three"}}
+    ]
+  }
+}
