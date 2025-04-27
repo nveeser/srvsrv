@@ -4,9 +4,9 @@ type strategy string
 
 const (
 	strategyDefault strategy = "default"
-	strategyIgnore  strategy = "ignore"
-	strategyReplace          = "replace"
-	strategyAppend           = "append"
+	pathIgnore      strategy = "ignore"
+	pathReplace              = "replace"
+	pathAppend               = "append"
 )
 
 type optionTrie struct {

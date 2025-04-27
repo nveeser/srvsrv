@@ -1,11 +1,12 @@
 package jsonwalk
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 )
 
-var Debug bool = true
+var Debug bool = false
 
 func debugf(p Path, format string, args ...any) {
 	if Debug {
@@ -21,17 +22,42 @@ type MergeOption func(visitor *mergeVisitor)
 
 func IgnorePath(path string) MergeOption {
 	return func(v *mergeVisitor) {
-		v.opts.put(ParsePath(path), strategyIgnore)
+		v.opts.put(ParsePath(path), pathIgnore)
 	}
 }
 
 func Replace(path string) MergeOption {
 	return func(v *mergeVisitor) {
-		v.opts.put(ParsePath(path), strategyReplace)
+		v.opts.put(ParsePath(path), pathReplace)
+	}
+}
+
+func Append(path string) MergeOption {
+	return func(v *mergeVisitor) {
+		v.opts.put(ParsePath(path), pathAppend)
 	}
 }
 
 type object = map[string]any
+
+func MergeJSON(dstJSON, srcJSON []byte, opts ...MergeOption) ([]byte, error) {
+	dstObj := make(map[string]any)
+	if err := json.Unmarshal(dstJSON, &dstObj); err != nil {
+		return nil, fmt.Errorf("error Unmarshal dstJSON: %w", err)
+	}
+	srcObj := make(map[string]any)
+	if err := json.Unmarshal(srcJSON, &srcObj); err != nil {
+		return nil, fmt.Errorf("error Unmarshal srcObj: %w", err)
+	}
+	if err := Merge(dstObj, dstObj, opts...); err != nil {
+		return nil, err
+	}
+	d, err := json.Marshal(dstObj)
+	if err != nil {
+		return nil, fmt.Errorf("error Marshal merged obj: %w", err)
+	}
+	return d, nil
+}
 
 func Merge(dst, src map[string]any, opts ...MergeOption) error {
 	v := &mergeVisitor{
@@ -68,7 +94,7 @@ func (m *mergeVisitor) Object(p Path, v object) Result {
 	case dstObj == nil:
 		debugf(p, "%s:object replace\n")
 		dstObj = v
-	case m.opts.strategy(p) == strategyIgnore:
+	case m.opts.strategy(p) == pathIgnore:
 		debugf(p, "%s:object ignore\n")
 		dstObj = v
 	}
@@ -86,10 +112,10 @@ func (m *mergeVisitor) Sequence(p Path, v []any) Result {
 		return Exit
 	}
 	switch {
-	case strat == strategyIgnore:
+	case strat == pathIgnore:
 		debugf(p, "%s:sequence ignore\n")
 		return Skip
-	case strat == strategyReplace:
+	case strat == pathReplace:
 		debugf(p, "%s:sequence replace\n")
 		dstSeq = v
 	case dstSeq == nil:
@@ -110,7 +136,7 @@ func (m *mergeVisitor) Scalar(p Path, v any) Result {
 		return Exit
 	}
 	switch {
-	case m.opts.strategy(p) == strategyIgnore:
+	case m.opts.strategy(p) == pathIgnore:
 		debugf(p, "%s:scalar ignore\n")
 	case dstAny == nil:
 		debugf(p, "%s:scalar set\n")

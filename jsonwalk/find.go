@@ -1,10 +1,44 @@
 package jsonwalk
 
 import (
+	"encoding/json"
+	"fmt"
 	"iter"
 	"slices"
 	"strings"
 )
+
+func FindJSON(data []byte, path string) ([][]byte, error) {
+	obj := make(map[string]any)
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return nil, fmt.Errorf("error Unmarshal data: %w", err)
+	}
+	var out [][]byte
+	for obj := range Find(obj, path) {
+		jsonOut, err := json.Marshal(obj)
+		if err != nil {
+			return nil, fmt.Errorf("error Marshal() %w", err)
+		}
+		out = append(out, jsonOut)
+	}
+	return out, nil
+}
+
+func FindOneJSON(data []byte, path string) ([]byte, bool, error) {
+	obj := make(map[string]any)
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return nil, false, fmt.Errorf("error Unmarshal data: %w", err)
+	}
+	foundObj, ok := FindOne(obj, path)
+	if !ok {
+		return nil, false, nil
+	}
+	foundJSON, err := json.Marshal(foundObj)
+	if err != nil {
+		return nil, false, fmt.Errorf("error Marshal() %w", err)
+	}
+	return foundJSON, true, err
+}
 
 func Find(obj any, path string) iter.Seq[any] {
 	return func(yield func(any) bool) {

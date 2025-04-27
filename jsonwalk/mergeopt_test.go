@@ -13,18 +13,18 @@ func TestOptionSet(t *testing.T) {
 		"a.y.x",
 	}
 	for _, p := range paths {
-		os.put(ParsePath(p), strategyAppend)
+		os.put(ParsePath(p), pathAppend)
 	}
 	{
 		got := os.strategy(ParsePath("a.b.1"))
-		if got != strategyAppend {
-			t.Errorf("strategy got %s wantPaths %s", got, strategyAppend)
+		if got != pathAppend {
+			t.Errorf("strategy got %s wantPaths %s", got, pathAppend)
 		}
 	}
 	{
 		got := os.strategy(ParsePath("a.b.1.c"))
-		if got != strategyAppend {
-			t.Errorf("strategy got %s wantPaths %s", got, strategyAppend)
+		if got != pathAppend {
+			t.Errorf("strategy got %s wantPaths %s", got, pathAppend)
 		}
 	}
 }
