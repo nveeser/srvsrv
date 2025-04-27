@@ -8,14 +8,8 @@ import (
 
 var Debug bool = false
 
-func debugf(p Path, format string, args ...any) {
-	if Debug {
-		indent := strings.Repeat(" ", p.Len())
-		format = "%s[%s]" + format
-		extra := []any{indent, p}
-		args = append(extra, args...)
-		fmt.Printf(format, args...)
-	}
+func debug(p Path, event string, _ any) {
+	fmt.Printf("%s[%s]: %s\n", strings.Repeat(" ", p.Len()), p, event)
 }
 
 type MergeOption func(visitor *mergeVisitor)
@@ -35,6 +29,17 @@ func Replace(path string) MergeOption {
 func Append(path string) MergeOption {
 	return func(v *mergeVisitor) {
 		v.opts.put(ParsePath(path), pathAppend)
+	}
+}
+
+// DebugFunc specifies a debug function for the given path.
+func DebugFunc(f func(p Path, event string, value any)) MergeOption {
+	return func(v *mergeVisitor) {
+		if f == nil {
+			v.debug = nil
+		} else {
+			v.debug = f
+		}
 	}
 }
 
@@ -63,6 +68,10 @@ func Merge(dst, src map[string]any, opts ...MergeOption) error {
 	v := &mergeVisitor{
 		dst:       dst,
 		dstByPath: make(map[string]object),
+		debug:     func(p Path, event string, value any) {},
+	}
+	if Debug {
+		v.debug = debug
 	}
 	v.dstByPath[""] = dst
 	for _, opt := range opts {
@@ -78,11 +87,12 @@ type mergeVisitor struct {
 	// objects by path
 	dstByPath map[string]object
 	error     error
+	debug     func(p Path, event string, value any)
 }
 
 func (m *mergeVisitor) Object(p Path, v object) Result {
 	if p == nil {
-		debugf(p, "%s:object skip root\n")
+		m.debug(p, "object skip root", v)
 		return Continue
 	}
 	parent, dstObj, err := parentValue[object](m.dstByPath, p)
@@ -91,11 +101,11 @@ func (m *mergeVisitor) Object(p Path, v object) Result {
 		return Exit
 	}
 	switch {
-	case dstObj == nil:
-		debugf(p, "%s:object replace\n")
-		dstObj = v
 	case m.opts.strategy(p) == pathIgnore:
-		debugf(p, "%s:object ignore\n")
+		m.debug(p, "object ignore", v)
+		dstObj = v
+	case dstObj == nil:
+		m.debug(p, "object replace", v)
 		dstObj = v
 	}
 	m.dstByPath[p.String()] = dstObj
@@ -105,7 +115,6 @@ func (m *mergeVisitor) Object(p Path, v object) Result {
 
 func (m *mergeVisitor) Sequence(p Path, v []any) Result {
 	strat := m.opts.strategy(p)
-
 	parent, dstSeq, err := parentValue[[]any](m.dstByPath, p)
 	if err != nil {
 		m.error = err
@@ -113,16 +122,16 @@ func (m *mergeVisitor) Sequence(p Path, v []any) Result {
 	}
 	switch {
 	case strat == pathIgnore:
-		debugf(p, "%s:sequence ignore\n")
+		m.debug(p, "sequence ignore", v)
 		return Skip
 	case strat == pathReplace:
-		debugf(p, "%s:sequence replace\n")
+		m.debug(p, "sequence replace", v)
 		dstSeq = v
 	case dstSeq == nil:
-		debugf(p, "%s:sequence add\n")
+		m.debug(p, "sequence add", v)
 		dstSeq = v
 	default:
-		debugf(p, "%s:slice append\n")
+		m.debug(p, "slice append", v)
 		dstSeq = append(dstSeq, v...)
 	}
 	parent[p.Key()] = dstSeq
@@ -137,12 +146,12 @@ func (m *mergeVisitor) Scalar(p Path, v any) Result {
 	}
 	switch {
 	case m.opts.strategy(p) == pathIgnore:
-		debugf(p, "%s:scalar ignore\n")
+		m.debug(p, "scalar ignore", v)
 	case dstAny == nil:
-		debugf(p, "%s:scalar set\n")
+		m.debug(p, "scalar set", v)
 		dstAny = v
 	default:
-		debugf(p, "%s:scalar replace\n")
+		m.debug(p, "scalar replace", v)
 		dstAny = v
 	}
 	parent[p.Key()] = dstAny
