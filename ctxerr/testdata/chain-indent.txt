@@ -1,0 +1,10 @@
+         [start-server]
+            /foo/src/ctxerr/errors_test.go:100
+         error: starting database: [init-storage]: error reading [open-db]: opening database: addr=172.10.10.10:256 [myFunc3-operation]: connection error
+         [init-storage]: error reading
+            /foo/src/ctxerr/errors_test.go:100
+         [open-db]: opening database: addr=172.10.10.10:256
+            /foo/src/ctxerr/errors_test.go:100
+         [myFunc3-operation]
+            /foo/src/ctxerr/stack_test.go:100
+         connection error

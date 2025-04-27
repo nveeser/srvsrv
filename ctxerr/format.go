@@ -6,17 +6,26 @@ import (
 	"io"
 	"iter"
 	"strconv"
+	"strings"
 )
+
+const tab = "   "
 
 func (e *Error) Format(s fmt.State, verb rune) {
 	switch verb {
 	case 's', 'v':
 		writeSummary(s, e, true)
 	case 'x':
-		stackErr := writeChain(s, e)
+		var indent string
+		if width, ok := s.Width(); ok {
+			indent = strings.Repeat(tab, width)
+		}
+		stackErr := writeChain(s, indent, e)
 		if s.Flag('+') {
-			io.WriteString(s, "\n\t[Inner Stack]\n\t")
-			writeStack(s, stackErr)
+			io.WriteString(s, "\n")
+			io.WriteString(s, indent)
+			io.WriteString(s, "[Inner Stack]\n")
+			writeStack(s, indent+tab, stackErr)
 		}
 	}
 }
@@ -52,22 +61,24 @@ func writeSummary(w io.Writer, e *Error, withCause bool) {
 		}
 		io.WriteString(w, ": ")
 		fmt.Fprintf(w, "%v", ce.Cause)
-		//io.WriteString(w, ce.Cause.Error())
 		return
 	}
 }
 
-func writeChain(w io.Writer, err *Error) (last *Error) {
+func writeChain(w io.Writer, indent string, err *Error) (last *Error) {
 	var written bool
 	for curr := range unwrap(err) {
 		if written {
 			io.WriteString(w, "\n")
 		}
+		io.WriteString(w, indent)
 		switch xe := curr.(type) {
 		case *Error:
 			writeSummary(w, xe, false)
 			if f := xe.stack.frames(); len(f) > 0 {
-				io.WriteString(w, "\n\t")
+				io.WriteString(w, "\n")
+				io.WriteString(w, indent)
+				io.WriteString(w, tab)
 				writeCallsite(w, f[0])
 			}
 			last = xe
@@ -79,14 +90,17 @@ func writeChain(w io.Writer, err *Error) (last *Error) {
 	return last
 }
 
-func writeStack(s io.Writer, e *Error) {
+func writeStack(s io.Writer, indent string, e *Error) {
 	var written bool
 	for frame := range walkStack(e.stack, 1) {
 		if written {
-			io.WriteString(s, "\n\t")
+			io.WriteString(s, "\n")
 		}
+		io.WriteString(s, indent)
 		writeCallsite(s, frame)
-		io.WriteString(s, " \n\t   ")
+		io.WriteString(s, "\n")
+		io.WriteString(s, indent)
+		io.WriteString(s, tab)
 		io.WriteString(s, frame.funcName)
 		io.WriteString(s, "(...)")
 		written = true

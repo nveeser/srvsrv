@@ -6,7 +6,6 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/nveeser/srvsrv/ctxerr/testdata"
-	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -99,31 +98,41 @@ func TestFormatVerbose(t *testing.T) {
 	err = fmt.Errorf("error: starting database: %w", err)
 	err = E(Op("start-server"), err)
 
-	t.Run("no-stack", func(t *testing.T) {
-		done := setupFrame()
-		defer done()
-		got := fmt.Sprintf("%x", err)
-		want := testdata.Read(t, "chain.txt")
+	cases := []struct {
+		name     string
+		format   string
+		wantFile string
+	}{
+		{
+			name:     "chain/no-stack",
+			format:   "%x",
+			wantFile: "chain.txt",
+		},
+		{
+			name:     "chain/no-stack/indent",
+			format:   "%3x",
+			wantFile: "chain-indent.txt",
+		},
+		{
+			name:     "chain/stack",
+			format:   "%+x",
+			wantFile: "chain-stack.txt",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			done := setupFrame()
+			defer done()
+			got := fmt.Sprintf(tc.format, err)
+			want := testdata.Read(t, tc.wantFile)
 
-		if diff := cmp.Diff(want, got, cmpopts.AcyclicTransformer("trim", trimWhitespace)); diff != "" {
-			t.Errorf("Diff: -want/+got %s", diff)
-			t.Logf("got\n%s\n", got)
-			t.Logf("wanted\n%s\n", want)
-		}
-	})
-	t.Run("stack", func(t *testing.T) {
-		done := setupFrame()
-		defer done()
-		got := fmt.Sprintf("%+x", err)
-		want := testdata.Read(t, "chain-stack.txt")
-
-		if diff := cmp.Diff(want, got, cmpopts.AcyclicTransformer("trim", trimWhitespace)); diff != "" {
-			t.Errorf("Diff: -want/+got %s", diff)
-			t.Logf("got\n%s\n", got)
-			t.Logf("wanted\n%s\n", want)
-		}
-	})
-
+			if diff := cmp.Diff(want, got, cmpopts.AcyclicTransformer("trim", trimWhitespace)); diff != "" {
+				t.Errorf("Diff: -want/+got %s", diff)
+				fmt.Printf("got\n%s\n", got)
+				fmt.Printf("wanted\n%s\n", want)
+			}
+		})
+	}
 	if t.Failed() {
 		dumpStacks(t, err)
 	}
@@ -154,7 +163,7 @@ func dumpStacks(t *testing.T, err error) {
 
 func trimWhitespace(s string) string {
 	s = strings.TrimSpace(s)
-	re := regexp.MustCompile(`\s+`)
-	s = re.ReplaceAllString(s, " ")
+	//re := regexp.MustCompile(`\s+`)
+	//s = re.ReplaceAllString(s, " ")
 	return s
 }
