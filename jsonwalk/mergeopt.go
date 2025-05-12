@@ -4,12 +4,12 @@ type strategy string
 
 const (
 	strategyDefault strategy = "default"
-	pathIgnore      strategy = "ignore"
+	pathIgnore               = "ignore"
 	pathReplace              = "replace"
 	pathAppend               = "append"
 )
 
-type optionTrie struct {
+type strategyTrie struct {
 	root *node
 }
 
@@ -20,7 +20,7 @@ type node struct {
 	strategy strategy
 }
 
-func (t *optionTrie) put(path Path, strat strategy) {
+func (t *strategyTrie) put(path Path, strat strategy) {
 	if t.root == nil {
 		t.root = &node{children: make(map[string]*node)}
 	}
@@ -39,7 +39,7 @@ func (t *optionTrie) put(path Path, strat strategy) {
 	n.strategy = strat
 }
 
-func (t *optionTrie) strategy(path Path) strategy {
+func (t *strategyTrie) strategy(path Path) strategy {
 	if t.root == nil {
 		return strategyDefault
 	}
@@ -49,7 +49,7 @@ func (t *optionTrie) strategy(path Path) strategy {
 	return strategyDefault
 }
 
-func (t *optionTrie) searchRecursive(node *node, path Path, index int) (strategy, bool) {
+func (t *strategyTrie) searchRecursive(node *node, path Path, index int) (strategy, bool) {
 	if index == len(path) {
 		return node.strategy, node.isSet
 	}

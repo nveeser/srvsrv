@@ -1,8 +1,6 @@
 package jsonwalk
 
 import (
-	"encoding/json"
-	"os"
 	"reflect"
 	"slices"
 	"testing"
@@ -15,11 +13,11 @@ func TestFind(t *testing.T) {
 		wantCount int
 		wantType  any
 	}{
-		{name: "obj", path: "a", wantCount: 1, wantType: map[string]any{}},
-		{name: "scalar", path: "a.value", wantCount: 1, wantType: "string"},
-		{name: "sequence", path: "a.seq", wantCount: 1, wantType: []any{nil}},
-		{name: "repeated/all", path: "a.seq.*.obj.name", wantCount: 3, wantType: "string"},
-		{name: "repeated/single", path: "a.seq.1.obj.name", wantCount: 1, wantType: "string"},
+		{name: "obj", path: "$.a", wantCount: 1, wantType: map[string]any{}},
+		{name: "scalar", path: "$.a.value", wantCount: 1, wantType: "string"},
+		{name: "sequence", path: "$.a.seq", wantCount: 1, wantType: []any{nil}},
+		{name: "repeated/all", path: "$.a.seq.*.obj.name", wantCount: 3, wantType: "string"},
+		{name: "repeated/single", path: "$.a.seq.1.obj.name", wantCount: 1, wantType: "string"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -44,11 +42,11 @@ func TestFindOne(t *testing.T) {
 		wantFound bool
 		wantType  any
 	}{
-		{name: "obj", path: "a", wantFound: true, wantType: map[string]any{}},
-		{name: "scalar", path: "a.value", wantFound: true, wantType: "string"},
-		{name: "sequence", path: "a.seq", wantFound: true, wantType: []any{nil}},
-		{name: "repeated", path: "a.seq.2", wantFound: true},
-		{name: "empty", path: "a.no.path", wantFound: false},
+		{name: "obj", path: "$.a", wantFound: true, wantType: map[string]any{}},
+		{name: "scalar", path: "$.a.value", wantFound: true, wantType: "string"},
+		{name: "sequence", path: "$.a.seq", wantFound: true, wantType: []any{nil}},
+		{name: "repeated", path: "$.a.seq.2", wantFound: true},
+		{name: "empty", path: "$.a.no.path", wantFound: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -64,16 +62,4 @@ func TestFindOne(t *testing.T) {
 			}
 		})
 	}
-}
-
-func readJSON(t *testing.T, filename string) map[string]any {
-	d, err := os.ReadFile(filename)
-	if err != nil {
-		t.Errorf("error reading test file %s: %v", filename, err)
-	}
-	obj := make(map[string]any)
-	if err = json.Unmarshal(d, &obj); err != nil {
-		t.Errorf("error unmarshing: %s: %v", filename, err)
-	}
-	return obj
 }

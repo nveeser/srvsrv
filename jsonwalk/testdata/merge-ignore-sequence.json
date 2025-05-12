@@ -1,0 +1,40 @@
+{
+  "Dst": {
+    "a": {
+      "value": "2222",
+      "seq": [
+        {"obj": {"name": "one" } },
+        {"obj": {"name": "two" } },
+        {"obj": {"name": "three" } }
+      ]
+    },
+    "b": {
+      "value": "value1"
+    }
+  },
+  "Src": {
+    "a": {
+      "value": "8888",
+      "seq": [
+        {"obj": {"name": "A" } },
+        {"obj": {"name": "B" } }
+      ]
+    },
+    "b": {
+      "value": "value2"
+    }
+  },
+  "Want": {
+    "a": {
+      "value": "8888",
+      "seq": [
+        {"obj": {"name": "one" } },
+        {"obj": {"name": "two" } },
+        {"obj": {"name": "three" } }
+      ]
+    },
+    "b": {
+      "value": "value2"
+    }
+  }
+}

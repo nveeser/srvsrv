@@ -25,11 +25,11 @@ func FindJSON(data []byte, path string) ([][]byte, error) {
 }
 
 func FindOneJSON(data []byte, path string) ([]byte, bool, error) {
-	obj := make(map[string]any)
-	if err := json.Unmarshal(data, &obj); err != nil {
+	mapping := make(map[string]any)
+	if err := json.Unmarshal(data, &mapping); err != nil {
 		return nil, false, fmt.Errorf("error Unmarshal data: %w", err)
 	}
-	foundObj, ok := FindOne(obj, path)
+	foundObj, ok := FindOne(mapping, path)
 	if !ok {
 		return nil, false, nil
 	}
@@ -40,21 +40,21 @@ func FindOneJSON(data []byte, path string) ([]byte, bool, error) {
 	return foundJSON, true, err
 }
 
-func Find(obj any, path string) iter.Seq[any] {
+func Find(mapping Mapping, path string) iter.Seq[any] {
 	return func(yield func(any) bool) {
 		v := &findVisitor{
 			path:  ParsePath(path),
 			yield: yield,
 		}
-		Walk(obj, v)
+		Walk(mapping, v)
 	}
 }
 
-func FindOne(obj any, path string) (any, bool) {
+func FindOne(mapping Mapping, path string) (any, bool) {
 	if strings.Contains(path, "*") {
 		panic("path may contain multiple values: " + path)
 	}
-	found := slices.Collect(Find(obj, path))
+	found := slices.Collect(Find(mapping, path))
 	switch len(found) {
 	case 1:
 		return found[0], true
@@ -70,9 +70,9 @@ type findVisitor struct {
 	yield func(any) bool
 }
 
-func (f *findVisitor) Object(p Path, v map[string]any) Result { return f.check(p, v) }
-func (f *findVisitor) Sequence(p Path, v []any) Result        { return f.check(p, v) }
-func (f *findVisitor) Scalar(p Path, v any) Result            { return f.check(p, v) }
+func (f *findVisitor) Mapping(p Path, _ Mapping, v map[string]any) Result { return f.check(p, v) }
+func (f *findVisitor) Sequence(p Path, _ Mapping, v []any) Result         { return f.check(p, v) }
+func (f *findVisitor) Scalar(p Path, _ Mapping, v any) Result             { return f.check(p, v) }
 
 func (f *findVisitor) check(p Path, v any) Result {
 	if !p.Match(f.path) {

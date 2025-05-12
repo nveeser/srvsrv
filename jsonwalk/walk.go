@@ -12,31 +12,31 @@ func WalkJSON(d []byte, visit Visitor) (Result, error) {
 	if err := json.Unmarshal(d, &root); err != nil {
 		return Exit, err
 	}
-	return walkObj(nil, root, visit), nil
+	return Walk(root, visit), nil
 }
 
-func Walk(obj any, visit Visitor) Result {
-	return walkObj(nil, obj, visit)
+func Walk(obj Mapping, visit Visitor) Result {
+	return walkIter(rootPath, obj, maps.All(obj), visit)
 }
 
-func walkObj(p Path, value any, visit Visitor) Result {
+func walkObj(p Path, m Mapping, value any, visit Visitor) Result {
 	switch v := value.(type) {
 	case map[string]any:
-		r := visit.Object(p, v)
+		r := visit.Mapping(p, m, v)
 		if r != Continue {
 			return r
 		}
-		return walkIter(p, maps.All(v), visit)
+		return walkIter(p, v, maps.All(v), visit)
 
 	case []any:
-		r := visit.Sequence(p, v)
+		r := visit.Sequence(p, m, v)
 		if r != Continue {
 			return r
 		}
-		return walkIter(p, keyedSlice(v), visit)
+		return walkIter(p, m, keyedSlice(v), visit)
 
 	default:
-		r := visit.Scalar(p, value)
+		r := visit.Scalar(p, m, value)
 		if r == Exit {
 			return r
 		}
@@ -44,9 +44,9 @@ func walkObj(p Path, value any, visit Visitor) Result {
 	return Continue
 }
 
-func walkIter(p Path, seq iter.Seq2[string, any], visit Visitor) Result {
+func walkIter(p Path, m Mapping, seq iter.Seq2[string, any], visit Visitor) Result {
 	for k, v := range seq {
-		r := walkObj(p.Child(k), v, visit)
+		r := walkObj(p.Child(k), m, v, visit)
 		if r == Exit {
 			return r
 		}

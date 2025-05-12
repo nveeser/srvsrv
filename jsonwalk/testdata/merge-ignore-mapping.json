@@ -1,0 +1,26 @@
+{
+  "Dst": {
+    "a": {
+      "value": "2222"
+    },
+    "b": {
+      "value": "value1"
+    }
+  },
+  "Src": {
+    "a": {
+      "value": "8888"
+    },
+    "b": {
+      "value": "value2"
+    }
+  },
+  "Want": {
+    "a": {
+      "value": "8888"
+    },
+    "b": {
+      "value": "value1"
+    }
+  }
+}

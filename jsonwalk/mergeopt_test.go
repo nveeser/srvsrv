@@ -3,7 +3,7 @@ package jsonwalk
 import "testing"
 
 func TestOptionSet(t *testing.T) {
-	var os optionTrie
+	var os strategyTrie
 	paths := []string{
 		"a.b.1",
 		"a.b.*.c",
