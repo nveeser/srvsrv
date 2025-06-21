@@ -158,9 +158,6 @@ func (q *Queue[E]) goqueue() {
 		qEmpty := s.size == 0
 		qReady := s.size > 0
 		qFull := s.size == q.max
-		//qEmpty := len(s.queue) == 0
-		//qReady := len(s.queue) > 0
-		//qFull := len(s.queue) >= q.max && q.max > 0
 
 		switch {
 		case !s.closed && !qFull && s.pushc == nil:
